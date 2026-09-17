@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>文化祭・迷路連絡</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f5;color:#111}
+main{max-width:700px;margin:auto;padding:24px 16px}h1{text-align:center;font-size:28px}
+.card{background:white;border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 2px 12px #0001}
+label{display:block;font-weight:700;margin:10px 0 6px}input{width:100%;font-size:20px;padding:12px;border:1px solid #bbb;border-radius:10px}
+button{width:100%;border:0;border-radius:14px;padding:18px;margin-top:12px;font-size:22px;font-weight:700;cursor:pointer}
+.primary{background:#111;color:white}.green{background:#20a060;color:white}.red{background:#d33;color:white}
+.status{font-size:42px;font-weight:800;text-align:center;padding:30px 10px;border-radius:18px;margin:15px 0}
+.ok{background:#dff7e8;color:#08733b}.busy{background:#ffe1e1;color:#a00}.muted{color:#666;text-align:center}
+.small{font-size:14px;color:#666;line-height:1.5}.hidden{display:none}
+#log{font-size:14px;max-height:150px;overflow:auto;background:#fafafa;padding:10px;border-radius:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>迷路・入退場連絡</h1>
+
+<div id="setup" class="card">
+  <p><b>使い方</b>：入口のスマホと出口のスマホで同じ部屋コードを入力してください。</p>
+  <label>部屋コード（4〜12文字）</label>
+  <input id="room" value="maze2026" maxlength="12" autocomplete="off">
+  <button class="primary" onclick="start()">接続する</button>
+  <p class="small">※インターネット接続が必要です。入口・出口の2台で同じコードを使います。</p>
+</div>
+
+<div id="app" class="hidden">
+  <div class="card">
+    <div id="connection" class="muted">接続中…</div>
+    <div id="status" class="status busy">🔴 使用中</div>
+    <p id="desc" class="muted">現在、迷路内に1組います。</p>
+  </div>
+
+  <div class="card">
+    <h2>この端末の役割</h2>
+    <button onclick="setRole('entry')">入口</button>
+    <button onclick="setRole('exit')">出口</button>
+    <p id="roleText" class="muted">役割を選んでください</p>
+  </div>
+
+  <div id="entryPanel" class="card hidden">
+    <h2>入口</h2>
+    <button class="green" onclick="sendState('ok')">🟢 次の組を入れる</button>
+    <button class="red" onclick="sendState('busy')">🔴 迷路使用中</button>
+  </div>
+
+  <div id="exitPanel" class="card hidden">
+    <h2>出口</h2>
+    <button class="green" onclick="sendState('ok')">🟢 退出完了・次を入れてOK</button>
+    <button class="red" onclick="sendState('busy')">🔴 まだ迷路内</button>
+  </div>
+
+  <div class="card">
+    <div class="small">通信ログ</div>
+    <div id="log"></div>
+  </div>
+</div>
+</main>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+let peer, conn, role, state='busy', roomCode;
+const $=id=>document.getElementById(id);
+function log(t){$('log').innerHTML='<div>'+new Date().toLocaleTimeString()+'　'+t+'</div>'+$('log').innerHTML}
+function render(){
+  $('status').className='status '+(state==='ok'?'ok':'busy');
+  $('status').textContent=state==='ok'?'🟢 次の組を入れてOK':'🔴 使用中';
+  $('desc').textContent=state==='ok'?'次の組を入場させてください。':'現在、迷路内に1組います。';
+}
+function setRole(r){
+ role=r;
+ $('entryPanel').classList.toggle('hidden',r!=='entry');
+ $('exitPanel').classList.toggle('hidden',r!=='exit');
+ $('roleText').textContent=r==='entry'?'入口端末':'出口端末';
+}
+function sendState(s){
+ state=s; render();
+ if(conn&&conn.open){conn.send({type:'state',state:s});log('状態を送信：'+s)}
+}
+function setupConn(c){
+ conn=c;
+ $('connection').textContent='🟢 2台接続済み';
+ log('もう1台と接続しました');
+ c.on('data',d=>{
+   if(d.type==='state'){state=d.state;render();log('状態を受信：'+d.state)}
+ });
+ c.on('close',()=>{$('connection').textContent='🟠 相手が切断しました';log('相手が切断')});
+ c.on('error',e=>log('通信エラー'));
+}
+function start(){
+ roomCode=$('room').value.trim();
+ if(roomCode.length<4){alert('4文字以上の部屋コードにしてください');return}
+ $('setup').classList.add('hidden');$('app').classList.remove('hidden');
+ // 部屋コードを安全なPeer IDに変換。2台のうち先に入った側が待機、後から入った側が接続。
+ const id='maze-festival-'+roomCode.replace(/[^a-zA-Z0-9_-]/g,'');
+ peer=new Peer(id);
+ peer.on('open',()=>{log('部屋を作成・待機中')});
+ peer.on('connection',c=>setupConn(c));
+ peer.on('error',e=>{
+   if(e.type==='unavailable-id'){
+     const p=new Peer();
+     p.on('open',()=>{const c=p.connect(id); c.on('open',()=>setupConn(c));});
+     peer=p;
+   } else {log('接続エラー：'+e.type);$('connection').textContent='🔴 接続できません'}
+ });
+ render();
+}
+</script>
+</body>
+</html>
